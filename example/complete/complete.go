@@ -17,6 +17,7 @@ func main() {
 	sconfig.AllowedAccessTypes = osin.AllowedAccessType{osin.AUTHORIZATION_CODE,
 		osin.REFRESH_TOKEN, osin.PASSWORD, osin.CLIENT_CREDENTIALS, osin.ASSERTION}
 	sconfig.AllowGetAccessRequest = true
+	sconfig.AllowClientSecretInParams = true
 	server := osin.NewServer(sconfig, example.NewTestStorage())
 
 	// Authorization code endpoint
@@ -90,7 +91,7 @@ func main() {
 		w.Write([]byte("<html><body>"))
 
 		w.Write([]byte(fmt.Sprintf("<a href=\"/authorize?response_type=code&client_id=1234&state=xyz&scope=everything&redirect_uri=%s\">Code</a><br/>", url.QueryEscape("http://localhost:14000/appauth/code"))))
-		w.Write([]byte(fmt.Sprintf("<a href=\"/authorize?response_type=token&client_id=1234&state=xyz&scope=everything&redirect_uri=%s\">Implict</a><br/>", url.QueryEscape("http://localhost:14000/appauth/token"))))
+		w.Write([]byte(fmt.Sprintf("<a href=\"/authorize?response_type=token&client_id=1234&state=xyz&scope=everything&redirect_uri=%s\">Implicit</a><br/>", url.QueryEscape("http://localhost:14000/appauth/token"))))
 		w.Write([]byte(fmt.Sprintf("<a href=\"/appauth/password\">Password</a><br/>")))
 		w.Write([]byte(fmt.Sprintf("<a href=\"/appauth/client_credentials\">Client Credentials</a><br/>")))
 		w.Write([]byte(fmt.Sprintf("<a href=\"/appauth/assertion\">Assertion</a><br/>")))
@@ -116,7 +117,7 @@ func main() {
 		jr := make(map[string]interface{})
 
 		// build access code url
-		aurl := fmt.Sprintf("/token?grant_type=authorization_code&client_id=1234&state=xyz&redirect_uri=%s&code=%s",
+		aurl := fmt.Sprintf("/token?grant_type=authorization_code&client_id=1234&client_secret=aabbccdd&state=xyz&redirect_uri=%s&code=%s",
 			url.QueryEscape("http://localhost:14000/appauth/code"), url.QueryEscape(code))
 
 		// if parse, download and parse json

@@ -28,6 +28,7 @@ type Response struct {
 	Output             ResponseData
 	Headers            http.Header
 	IsError            bool
+	ErrorId            string
 	InternalError      error
 	RedirectInFragment bool
 
@@ -75,6 +76,7 @@ func (r *Response) SetErrorUri(id string, description string, uri string, state 
 
 	// set error parameters
 	r.IsError = true
+	r.ErrorId = id
 	r.StatusCode = r.ErrorStatusCode
 	if r.StatusCode != 200 {
 		r.StatusText = description
@@ -92,7 +94,7 @@ func (r *Response) SetErrorUri(id string, description string, uri string, state 
 	}
 }
 
-// SetErrorUri changes the response to redirect to the given url
+// SetRedirect changes the response to redirect to the given url
 func (r *Response) SetRedirect(url string) {
 	// set redirect parameters
 	r.Type = REDIRECT
@@ -115,21 +117,32 @@ func (r *Response) GetRedirectUrl() (string, error) {
 		return "", err
 	}
 
+	var q url.Values
+	if r.RedirectInFragment {
+		// start with empty set for fragment
+		q = url.Values{}
+	} else {
+		// add parameters to existing query
+		q = u.Query()
+	}
+
 	// add parameters
-	q := u.Query()
 	for n, v := range r.Output {
 		q.Set(n, fmt.Sprint(v))
 	}
+
+	// https://tools.ietf.org/html/rfc6749#section-4.2.2
+	// Fragment should be encoded as application/x-www-form-urlencoded (%-escaped, spaces are represented as '+')
+	// The stdlib URL#String() doesn't make that easy to accomplish, so build this ourselves
 	if r.RedirectInFragment {
-		u.RawQuery = ""
-		u.Fragment, err = url.QueryUnescape(q.Encode())
-		if err != nil {
-			return "", err
-		}
-	} else {
-		u.RawQuery = q.Encode()
+		u.Fragment = ""
+		redirectURI := u.String() + "#" + q.Encode()
+		return redirectURI, nil
 	}
 
+	// Otherwise, update the query and encode normally
+	u.RawQuery = q.Encode()
+	u.Fragment = ""
 	return u.String(), nil
 }
 

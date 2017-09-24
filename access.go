@@ -1,8 +1,11 @@
 package osin
 
 import (
+	"crypto/sha256"
+	"encoding/base64"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -11,11 +14,11 @@ type AccessRequestType string
 
 const (
 	AUTHORIZATION_CODE AccessRequestType = "authorization_code"
-	REFRESH_TOKEN                        = "refresh_token"
-	PASSWORD                             = "password"
-	CLIENT_CREDENTIALS                   = "client_credentials"
-	ASSERTION                            = "assertion"
-	IMPLICIT                             = "__implicit"
+	REFRESH_TOKEN      AccessRequestType = "refresh_token"
+	PASSWORD           AccessRequestType = "password"
+	CLIENT_CREDENTIALS AccessRequestType = "client_credentials"
+	ASSERTION          AccessRequestType = "assertion"
+	IMPLICIT           AccessRequestType = "__implicit"
 )
 
 // AccessRequest is a request for access tokens
@@ -49,6 +52,9 @@ type AccessRequest struct {
 
 	// HttpRequest *http.Request for special use
 	HttpRequest *http.Request
+
+	// Optional code_verifier as described in rfc7636
+	CodeVerifier string
 }
 
 // AccessData represents an access grant (tokens, expiration, client, etc)
@@ -157,6 +163,7 @@ func (s *Server) handleAuthorizationCodeRequest(w *Response, r *http.Request) *A
 	ret := &AccessRequest{
 		Type:            AUTHORIZATION_CODE,
 		Code:            r.Form.Get("code"),
+		CodeVerifier:    r.Form.Get("code_verifier"),
 		RedirectUri:     r.Form.Get("redirect_uri"),
 		GenerateRefresh: true,
 		Expiration:      s.Config.AccessExpiration,
@@ -220,11 +227,63 @@ func (s *Server) handleAuthorizationCodeRequest(w *Response, r *http.Request) *A
 		return nil
 	}
 
+	// Verify PKCE, if present in the authorization data
+	if len(ret.AuthorizeData.CodeChallenge) > 0 {
+		// https://tools.ietf.org/html/rfc7636#section-4.1
+		if matched := pkceMatcher.MatchString(ret.CodeVerifier); !matched {
+			w.SetError(E_INVALID_REQUEST, "code_verifier invalid (rfc7636)")
+			w.InternalError = errors.New("code_verifier has invalid format")
+			return nil
+		}
+
+		// https: //tools.ietf.org/html/rfc7636#section-4.6
+		codeVerifier := ""
+		switch ret.AuthorizeData.CodeChallengeMethod {
+		case "", PKCE_PLAIN:
+			codeVerifier = ret.CodeVerifier
+		case PKCE_S256:
+			hash := sha256.Sum256([]byte(ret.CodeVerifier))
+			codeVerifier = base64.RawURLEncoding.EncodeToString(hash[:])
+		default:
+			w.SetError(E_INVALID_REQUEST, "code_challenge_method transform algorithm not supported (rfc7636)")
+			return nil
+		}
+		if codeVerifier != ret.AuthorizeData.CodeChallenge {
+			w.SetError(E_INVALID_GRANT, "code_verifier invalid (rfc7636)")
+			w.InternalError = errors.New("code_verifier failed comparison with code_challenge")
+			return nil
+		}
+	}
+
 	// set rest of data
 	ret.Scope = ret.AuthorizeData.Scope
 	ret.UserData = ret.AuthorizeData.UserData
 
 	return ret
+}
+
+func extraScopes(access_scopes, refresh_scopes string) bool {
+	access_scopes_list := strings.Split(access_scopes, " ")
+	refresh_scopes_list := strings.Split(refresh_scopes, " ")
+
+	access_map := make(map[string]int)
+
+	for _, scope := range access_scopes_list {
+		if scope == "" {
+			continue
+		}
+		access_map[scope] = 1
+	}
+
+	for _, scope := range refresh_scopes_list {
+		if scope == "" {
+			continue
+		}
+		if _, ok := access_map[scope]; !ok {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) handleRefreshTokenRequest(w *Response, r *http.Request) *AccessRequest {
@@ -289,6 +348,12 @@ func (s *Server) handleRefreshTokenRequest(w *Response, r *http.Request) *Access
 	ret.UserData = ret.AccessData.UserData
 	if ret.Scope == "" {
 		ret.Scope = ret.AccessData.Scope
+	}
+
+	if extraScopes(ret.AccessData.Scope, ret.Scope) {
+		w.SetError(E_ACCESS_DENIED, "")
+		w.InternalError = errors.New("the requested scope must not include any scope not originally granted by the resource owner")
+		return nil
 	}
 
 	return ret
@@ -443,7 +508,7 @@ func (s *Server) FinishAccessRequest(w *Response, r *http.Request, ar *AccessReq
 		}
 
 		// remove previous access token
-		if ret.AccessData != nil {
+		if ret.AccessData != nil && !s.Config.RetainTokenAfterRefresh {
 			if ret.AccessData.RefreshToken != "" {
 				w.Storage.RemoveRefresh(ret.AccessData.RefreshToken)
 			}
@@ -457,8 +522,8 @@ func (s *Server) FinishAccessRequest(w *Response, r *http.Request, ar *AccessReq
 		if ret.RefreshToken != "" {
 			w.Output["refresh_token"] = ret.RefreshToken
 		}
-		if ar.Scope != "" {
-			w.Output["scope"] = ar.Scope
+		if ret.Scope != "" {
+			w.Output["scope"] = ret.Scope
 		}
 	} else {
 		w.SetError(E_ACCESS_DENIED, "")
@@ -480,10 +545,12 @@ func getClient(auth *BasicAuth, storage Storage, w *Response) Client {
 		w.SetError(E_UNAUTHORIZED_CLIENT, "Client not found")
 		return nil
 	}
-	if client.GetSecret() != auth.Password {
+
+	if !CheckClientSecret(client, auth.Password) {
 		w.SetError(E_UNAUTHORIZED_CLIENT, "Invalid client secret")
 		return nil
 	}
+
 	if client.GetRedirectUri() == "" {
 		w.SetError(E_UNAUTHORIZED_CLIENT, "Empty client redirect URI")
 		return nil
