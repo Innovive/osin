@@ -35,25 +35,26 @@ func (s *Server) HandleInfoRequest(w *Response, r *http.Request) *InfoRequest {
 
 	// load access data
 	ret.AccessData, err = w.Storage.LoadAccess(ret.Code)
+	// fmt.Printf("Access data: %s %+v\n", err, ret.AccessData)
 	if err != nil {
-		w.SetError(E_INVALID_REQUEST, "")
+		w.SetError(E_INVALID_REQUEST, err.Error())
 		w.InternalError = err
 		return nil
 	}
 	if ret.AccessData == nil {
-		w.SetError(E_INVALID_REQUEST, "")
+		w.SetError(E_INVALID_REQUEST, "Empty access data")
 		return nil
 	}
 	if ret.AccessData.Client == nil {
-		w.SetError(E_UNAUTHORIZED_CLIENT, "")
+		w.SetError(E_UNAUTHORIZED_CLIENT, "Access data client")
 		return nil
 	}
 	if ret.AccessData.Client.GetRedirectUri() == "" {
-		w.SetError(E_UNAUTHORIZED_CLIENT, "")
+		w.SetError(E_UNAUTHORIZED_CLIENT, "Access data client redirect URI")
 		return nil
 	}
 	if ret.AccessData.IsExpiredAt(s.Now()) {
-		w.SetError(E_INVALID_GRANT, "")
+		w.SetError(E_INVALID_GRANT, "Access data is expired")
 		return nil
 	}
 

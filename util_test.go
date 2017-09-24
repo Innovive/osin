@@ -82,15 +82,15 @@ func TestGetClientAuth(t *testing.T) {
 		{headerOKAuth, urlNoSecret, false, true},
 	}
 
-	for _, tt := range tests {
+	for i, tt := range tests {
 		w := new(Response)
 		r := &http.Request{Header: tt.header, URL: tt.url}
 		r.ParseForm()
 		auth := getClientAuth(w, r, tt.allowQueryParams)
 		if tt.expectAuth && auth == nil {
-			t.Errorf("Auth should not be nil for %v", tt)
+			t.Errorf("Auth should not be nil for (%d) %v", i, tt)
 		} else if !tt.expectAuth && auth != nil {
-			t.Errorf("Auth should be nil for %v", tt)
+			t.Errorf("Auth should be nil for (%d) %v", i, tt)
 		}
 	}
 
