@@ -129,16 +129,16 @@ func (s *Server) HandleAuthorizeRequest(w *Response, r *http.Request) *Authorize
 		return nil
 	}
 	if err != nil {
-		w.SetErrorState(E_SERVER_ERROR, "", ret.State)
+		w.SetErrorState(E_SERVER_ERROR, err.Error(), ret.State)
 		w.InternalError = err
 		return nil
 	}
 	if ret.Client == nil {
-		w.SetErrorState(E_UNAUTHORIZED_CLIENT, "", ret.State)
+		w.SetErrorState(E_UNAUTHORIZED_CLIENT, err.Error(), ret.State)
 		return nil
 	}
 	if ret.Client.GetRedirectUri() == "" {
-		w.SetErrorState(E_UNAUTHORIZED_CLIENT, "", ret.State)
+		w.SetErrorState(E_UNAUTHORIZED_CLIENT, err.Error(), ret.State)
 		return nil
 	}
 
